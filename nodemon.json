@@ -1,0 +1,8 @@
+{
+  "watch": ["server.js", "*.csv"],
+  "ignore": ["auction_data.json", "node_modules/*", "*.log"],
+  "ext": "js,csv",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}

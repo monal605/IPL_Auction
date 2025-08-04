@@ -1,0 +1,464 @@
+# Fantasy Sports Auction API Reference
+
+## Core Auction APIs
+
+**Endpoint**: `/create-room`
+**Method**: `POST`
+**Description**: Creates a new auction room with specified users and budget allocation.
+**Sample Request Input:**
+```bash
+curl -X POST http://localhost:3000/create-room \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomId": "ipl-auction-2024",
+    "users": ["mumbai-indians", "chennai-super-kings", "royal-challengers"],
+    "budgetPerUser": 95000000
+  }'
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "message": "Room created successfully",
+  "roomId": "ipl-auction-2024",
+  "users": ["mumbai-indians", "chennai-super-kings", "royal-challengers"],
+  "budgetPerUser": 95000000,
+  "maxPlayersPerTeam": 15,
+  "blindBidPlayersAvailable": 3,
+  "mainAuctionPlayersAvailable": 18
+}
+```
+
+---
+
+**Endpoint**: `/blind-bid-players`
+**Method**: `GET`
+**Description**: Retrieves all players available for blind bidding (players without base prices).
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/blind-bid-players
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "players": [
+    {
+      "name": "Player Without Base 1",
+      "team": "RCB",
+      "type": "BAT"
+    },
+    {
+      "name": "Player Without Base 2", 
+      "team": "CSK",
+      "type": "BOWL"
+    },
+    {
+      "name": "Player Without Base 3",
+      "team": "MI", 
+      "type": "AR"
+    }
+  ],
+  "count": 3
+}
+```
+
+---
+
+**Endpoint**: `/next-batch/:roomId`
+**Method**: `GET`
+**Description**: Gets the next batch of players for main auction based on cycling through player types (BAT, AR, BOWL, WK).
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/next-batch/ipl-auction-2024
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "players": [
+    {
+      "name": "Rohit Sharma",
+      "team": "MI",
+      "type": "BAT",
+      "basePrice": 16000000
+    },
+    {
+      "name": "Virat Kohli", 
+      "team": "RCB",
+      "type": "BAT",
+      "basePrice": 15000000
+    },
+    {
+      "name": "David Warner",
+      "team": "DC", 
+      "type": "BAT",
+      "basePrice": 6250000
+    }
+  ],
+  "currentType": "BAT",
+  "nextType": "AR", 
+  "batchSize": 8,
+  "playersInBatch": 3,
+  "totalSentPlayers": 3
+}
+```
+
+---
+
+**Endpoint**: `/select-player`
+**Method**: `POST`
+**Description**: Purchases a player for a specific team, deducting from their budget.
+**Sample Request Input:**
+```bash
+curl -X POST http://localhost:3000/select-player \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomId": "ipl-auction-2024",
+    "playerName": "Virat Kohli",
+    "soldPrice": 17000000,
+    "buyerTeam": "royal-challengers"
+  }'
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "message": "Virat Kohli sold to royal-challengers for 17000000",
+  "player": {
+    "name": "Virat Kohli",
+    "soldPrice": 17000000,
+    "buyerTeam": "royal-challengers"
+  },
+  "remainingBudget": 78000000,
+  "teamPlayerCount": 1
+}
+```
+
+---
+
+**Endpoint**: `/room-state/:roomId`
+**Method**: `GET`
+**Description**: Returns comprehensive room state including all teams, their budgets, players, and auction progress.
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/room-state/ipl-auction-2024
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "data": {
+    "roomId": "ipl-auction-2024",
+    "users": [
+      {
+        "username": "mumbai-indians",
+        "budget": 95000000,
+        "spentAmount": 0,
+        "players": [],
+        "playerCount": 0,
+        "canBuyMore": true
+      },
+      {
+        "username": "royal-challengers", 
+        "budget": 78000000,
+        "spentAmount": 17000000,
+        "players": [
+          {
+            "name": "Virat Kohli",
+            "team": "RCB",
+            "type": "BAT",
+            "basePrice": 15000000,
+            "boughtPrice": 17000000,
+            "boughtAt": "2024-03-24T10:30:00.000Z"
+          }
+        ],
+        "playerCount": 1,
+        "canBuyMore": true
+      }
+    ],
+    "currentType": "AR",
+    "nextType": "BOWL",
+    "remainingPlayers": 17,
+    "totalPlayersSent": 1,
+    "blindBidPlayersCount": 3,
+    "mainAuctionPlayersCount": 18,
+    "soldPlayersCount": 1,
+    "auctionPhase": "main_auction"
+  }
+}
+```
+
+---
+
+## Legacy/Support APIs
+
+**Endpoint**: `/join-room`
+**Method**: `POST`
+**Description**: Adds a team to an existing room (legacy endpoint for backward compatibility).
+**Sample Request Input:**
+```bash
+curl -X POST http://localhost:3000/join-room \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomID": "ipl-auction-2024",
+    "teamName": "delhi-capitals"
+  }'
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "message": "Team added to room",
+  "teamName": "delhi-capitals",
+  "budget": 95000000
+}
+```
+
+---
+
+**Endpoint**: `/room-data/:roomID`
+**Method**: `GET`
+**Description**: Gets basic room information and user data (legacy format).
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/room-data/ipl-auction-2024
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "data": {
+    "roomID": "ipl-auction-2024",
+    "users": [
+      {
+        "username": "mumbai-indians",
+        "budget": 95000000,
+        "players": []
+      },
+      {
+        "username": "royal-challengers",
+        "budget": 78000000, 
+        "players": [
+          {
+            "name": "Virat Kohli",
+            "team": "RCB",
+            "type": "BAT",
+            "basePrice": 15000000,
+            "boughtPrice": 17000000,
+            "boughtAt": "2024-03-24T10:30:00.000Z"
+          }
+        ]
+      }
+    ],
+    "budgetPerUser": 95000000,
+    "soldPlayersCount": 1,
+    "createdAt": "2024-03-24T10:00:00.000Z",
+    "lastActivity": "2024-03-24T10:30:00.000Z"
+  }
+}
+```
+
+---
+
+## Debug & Monitoring APIs
+
+**Endpoint**: `/health`
+**Method**: `GET`
+**Description**: Server health check and system status information.
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/health
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "message": "Fantasy Sports Auction Server is running",
+  "timestamp": "2024-03-24T10:45:00.000Z",
+  "activeRooms": 1,
+  "storage": "lowdb (file-based)",
+  "csvPlayersLoaded": 21,
+  "blindBidPlayers": 3,
+  "mainAuctionPlayers": 18
+}
+```
+
+---
+
+**Endpoint**: `/debug/players`
+**Method**: `GET`
+**Description**: Debug information about loaded players and batch configuration.
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/debug/players
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "totalPlayers": 21,
+  "blindBidPlayers": 3,
+  "mainAuctionPlayers": {
+    "BAT": 5,
+    "AR": 3,
+    "BOWL": 6,
+    "WK": 4
+  },
+  "batchConfig": {
+    "BAT": 8,
+    "AR": 5, 
+    "BOWL": 8,
+    "WK": 5
+  },
+  "cycleOrder": ["BAT", "AR", "BOWL", "WK"]
+}
+```
+
+---
+
+**Endpoint**: `/debug/rooms`
+**Method**: `GET`
+**Description**: Debug information about all active rooms and their current state.
+**Sample Request Input:**
+```bash
+curl http://localhost:3000/debug/rooms
+```
+**Sample Response Output:**
+```json
+{
+  "success": true,
+  "totalRooms": 1,
+  "rooms": [
+    {
+      "roomID": "ipl-auction-2024",
+      "userCount": 2,
+      "currentType": "AR",
+      "sentPlayers": 1,
+      "soldPlayers": 1,
+      "lastActivity": "2024-03-24T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+## Complete Testing Workflow
+
+Here's a complete curl-based testing sequence:
+
+```bash
+# 1. Check server health
+curl http://localhost:3000/health
+
+# 2. Check loaded players
+curl http://localhost:3000/debug/players
+
+# 3. Create auction room
+curl -X POST http://localhost:3000/create-room \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomId": "test-auction",
+    "users": ["teamA", "teamB", "teamC"],
+    "budgetPerUser": 100000000
+  }'
+
+# 4. Get blind bid players
+curl http://localhost:3000/blind-bid-players
+
+# 5. Get first batch of main auction players
+curl http://localhost:3000/next-batch/test-auction
+
+# 6. Buy a player
+curl -X POST http://localhost:3000/select-player \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomId": "test-auction",
+    "playerName": "Virat Kohli",
+    "soldPrice": 16000000,
+    "buyerTeam": "teamA"
+  }'
+
+# 7. Check room state
+curl http://localhost:3000/room-state/test-auction
+
+# 8. Get next batch
+curl http://localhost:3000/next-batch/test-auction
+
+# 9. Buy another player
+curl -X POST http://localhost:3000/select-player \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roomId": "test-auction",
+    "playerName": "MS Dhoni",
+    "soldPrice": 15000000,
+    "buyerTeam": "teamB"
+  }'
+
+# 10. Check final room state
+curl http://localhost:3000/room-state/test-auction
+```
+
+---
+
+## Error Responses
+
+All endpoints may return error responses in the following format:
+
+**400 Bad Request:**
+```json
+{
+  "success": false,
+  "message": "roomId, playerName, soldPrice, and buyerTeam are required"
+}
+```
+
+**404 Not Found:**
+```json
+{
+  "success": false,
+  "message": "Room not found"
+}
+```
+
+**409 Conflict:**
+```json
+{
+  "success": false,
+  "message": "Room already exists"
+}
+```
+
+**500 Internal Server Error:**
+```json
+{
+  "success": false,
+  "message": "Internal server error"
+}
+```
+
+---
+
+## Configuration Constants
+
+- **DEFAULT_BUDGET**: 100,000 (if not specified in room creation)
+- **MAX_PLAYERS_PER_TEAM**: 15
+- **ROOM_CLEANUP_INTERVAL**: 30 minutes
+- **ROOM_INACTIVE_TIMEOUT**: 1 hour
+
+## Batch Configuration for Main Auction
+
+- **BAT (Batsmen)**: 8 players per batch
+- **AR (All-Rounders)**: 5 players per batch  
+- **BOWL (Bowlers)**: 8 players per batch
+- **WK (Wicket-Keepers)**: 5 players per batch
+
+## CSV File Requirements
+
+The server expects `auction.csv` with columns:
+- **Players**: Player name
+- **Team**: Original team
+- **Type**: Player type (BAT/AR/BOWL/WK)
+- **BASE**: Base price (use '-' for blind bid players)
+- **SOLD**: Sold price (optional, updated during auction)
