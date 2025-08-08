@@ -1,0 +1,198 @@
+# Next.js Page Structure - Fantasy Auction
+
+## 📁 **File Structure**
+```
+pages/
+├── index.js                    # Landing Page (Create/Join Room)
+├── room/
+│   └── [roomId].js            # Room Dashboard
+├── players/
+│   └── [roomId].js            # Player Pool & Batches
+├── auction/
+│   └── [roomId].js            # Regular Auction
+├── blind/
+│   └── [roomId].js            # Blind Bidding
+├── monitor/
+│   └── [roomId].js            # Auction Monitor
+└── admin/
+    └── [roomId].js            # System & Admin
+```
+
+---
+
+## 🏠 **1. Landing Page - `/pages/index.js`**
+*Create or join auction rooms*
+
+### API Endpoints Used:
+- `POST /create-room` - Create new room
+- `POST /join-room` - Join existing room
+- `GET /health` - Server health check
+
+### Page Features:
+- Create room form (room ID, teams, budget)
+- Join room form (room ID, team name)
+- Server status indicator
+
+---
+
+## 📊 **2. Room Dashboard - `/pages/room/[roomId].js`**
+*Main room overview and navigation hub*
+
+### API Endpoints Used:
+- `GET /room-data/:roomID` - Basic room info
+- `GET /room-state/:roomId` - Detailed room state
+- `GET /room-bids/:roomId` - Active bidding summary
+
+### Page Features:
+- Room overview (teams, budgets, players)
+- Navigation to other sections
+- Real-time room status
+- Team statistics
+
+---
+
+## 🎯 **3. Player Pool - `/pages/players/[roomId].js`**
+*Browse available players and batches*
+
+### API Endpoints Used:
+- `GET /blind-bid-players` - Get blind bid players
+- `GET /next-batch/:roomId` - Get next player batch
+- `GET /debug/players` - Player distribution
+
+### Page Features:
+- View blind bid players
+- Browse main auction batches
+- Filter by player type (BAT, AR, BOWL, WK)
+- Player statistics and info
+
+---
+
+## 🏏 **4. Regular Auction - `/pages/auction/[roomId].js`**
+*Live bidding interface*
+
+### API Endpoints Used:
+- `POST /start-bidding` - Start player bidding
+- `POST /place-bid` - Place bid
+- `GET /player-bids/:roomId/:playerName` - View player bids
+- `POST /close-bidding` - Emergency close bidding
+
+### Page Features:
+- Active bidding interface
+- Bid placement form
+- Real-time bid updates
+- Timer countdown
+- Current highest bidder display
+
+---
+
+## 🎪 **5. Blind Bidding - `/pages/blind/[roomId].js`**
+*Sealed bidding interface*
+
+### API Endpoints Used:
+- `POST /start-blind-bidding` - Start blind auction
+- `POST /place-blind-bid` - Place sealed bid
+- `GET /blind-bids/:roomId/:playerName` - View results
+
+### Page Features:
+- Mystery player cards
+- Sealed bid submission
+- Timer (5 minutes)
+- Results reveal after timeout
+
+---
+
+## 📈 **6. Auction Monitor - `/pages/monitor/[roomId].js`**
+*Track all auction activity*
+
+### API Endpoints Used:
+- `GET /room-bids/:roomId` - All active bids
+- `GET /bidding-history/:roomId` - Completed auctions
+- `GET /room-state/:roomId` - Current room state
+
+### Page Features:
+- Active bidding tracker
+- Auction history
+- Team spending analysis
+- Player sold summary
+- Live activity feed
+
+---
+
+## ⚙️ **7. Admin Panel - `/pages/admin/[roomId].js`**
+*System control and debugging*
+
+### API Endpoints Used:
+- `GET /health` - Server health
+- `GET /debug/rooms` - Room activity
+- `GET /debug/players` - Player distribution
+- `POST /select-player` - Direct purchase
+- `POST /close-bidding` - Force close bids
+
+### Page Features:
+- System health monitoring
+- Emergency controls
+- Direct player assignment
+- Room debugging info
+- Server statistics
+
+---
+
+## 🔄 **Navigation Flow**
+
+```
+Landing Page (/)
+    ↓ Create/Join Room
+Room Dashboard (/room/[roomId])
+    ↓ Navigate to:
+    ├── Players (/players/[roomId])
+    ├── Auction (/auction/[roomId])
+    ├── Blind Bidding (/blind/[roomId])
+    ├── Monitor (/monitor/[roomId])
+    └── Admin (/admin/[roomId])
+```
+
+---
+
+## 📝 **Page Implementation Pattern**
+
+Each page follows this structure:
+```javascript
+// pages/example/[roomId].js
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+
+export default function ExamplePage() {
+  const router = useRouter();
+  const { roomId } = router.query;
+  const [data, setData] = useState(null);
+  
+  // API calls
+  const fetchData = async () => {
+    const response = await fetch(`/api-endpoint/${roomId}`);
+    const result = await response.json();
+    setData(result);
+  };
+  
+  useEffect(() => {
+    if (roomId) fetchData();
+  }, [roomId]);
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900">
+      {/* Page content */}
+    </div>
+  );
+}
+```
+
+---
+
+## 🎨 **Styling Consistency**
+
+All pages use the same design system:
+- **Background**: `bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900`
+- **Cards**: `bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20`
+- **Buttons**: `bg-white/20 hover:bg-white/30 rounded-xl backdrop-blur-sm`
+- **Inputs**: `bg-white/20 border border-white/30 rounded-xl text-white`
+
+This keeps the entire app visually cohesive while maintaining simplicity.

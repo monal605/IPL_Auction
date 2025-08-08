@@ -1,3 +1,76 @@
 {
-  "rooms": {}
+  "rooms": {
+    "room123": {
+      "roomId": "room123",
+      "users": {
+        "team1": {
+          "username": "team1",
+          "budget": 1000000,
+          "players": []
+        },
+        "team2": {
+          "username": "team2",
+          "budget": 1000000,
+          "players": []
+        },
+        "team3": {
+          "username": "team3",
+          "budget": 1000000,
+          "players": []
+        },
+        "team4": {
+          "username": "team4",
+          "budget": 1000000,
+          "players": []
+        }
+      },
+      "budgetPerUser": 1000000,
+      "createdAt": "2025-08-05T03:20:13.860Z",
+      "lastActivity": "2025-08-05T03:21:38.417Z",
+      "soldPlayers": {},
+      "currentBids": {},
+      "blindBids": {},
+      "batchState": {
+        "currentCycleIndex": 1,
+        "sentPlayers": {},
+        "typePointers": {
+          "BAT": 174,
+          "AR": 10,
+          "BOWL": 0,
+          "WK": 0
+        }
+      }
+    },
+    "TRIAL-1": {
+      "roomId": "TRIAL-1",
+      "users": {
+        "RCB": {
+          "username": "RCB",
+          "budget": 95000000,
+          "players": []
+        },
+        "CSK": {
+          "username": "CSK",
+          "budget": 95000000,
+          "players": []
+        }
+      },
+      "budgetPerUser": 95000000,
+      "createdAt": "2025-08-07T14:19:08.859Z",
+      "lastActivity": "2025-08-07T14:19:08.860Z",
+      "soldPlayers": {},
+      "currentBids": {},
+      "blindBids": {},
+      "batchState": {
+        "currentCycleIndex": 0,
+        "sentPlayers": {},
+        "typePointers": {
+          "BAT": 0,
+          "AR": 0,
+          "BOWL": 0,
+          "WK": 0
+        }
+      }
+    }
+  }
 }
