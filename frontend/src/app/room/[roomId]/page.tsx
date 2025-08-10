@@ -25,7 +25,7 @@ interface UserInfo {
 const TeamSelectionPage = () => {
   const router = useRouter();
   const params = useParams();
-  const roomID = params.roomID as string;
+  const roomID = params.roomId as string;
   
   const [roomData, setRoomData] = useState<RoomData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,6 +182,15 @@ const TeamSelectionPage = () => {
     return () => clearInterval(interval);
   }, [loading, refreshing, joining, roomID]);
 
+  const getTeamStatus = (team: Team) => {
+    const userCount = team.users.length;
+    const maxUsers = team.maxUsers;
+    
+    if (userCount >= maxUsers) return { text: 'Full', color: 'bg-red-500/20 text-red-300 border-red-400/30' };
+    if (userCount > 0) return { text: 'Active', color: 'bg-green-500/20 text-green-300 border-green-400/30' };
+    return { text: 'Empty', color: 'bg-gray-500/20 text-gray-300 border-gray-400/30' };
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center">
@@ -217,15 +226,6 @@ const TeamSelectionPage = () => {
       </div>
     );
   }
-
-  const getTeamStatus = (team: Team) => {
-    const userCount = team.users.length;
-    const maxUsers = team.maxUsers;
-    
-    if (userCount >= maxUsers) return { text: 'Full', color: 'bg-red-500/20 text-red-300 border-red-400/30' };
-    if (userCount > 0) return { text: 'Active', color: 'bg-green-500/20 text-green-300 border-green-400/30' };
-    return { text: 'Empty', color: 'bg-gray-500/20 text-gray-300 border-gray-400/30' };
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900">
@@ -302,7 +302,7 @@ const TeamSelectionPage = () => {
             </h2>
             
             <div className="space-y-4">
-              {roomData?.teams.map((team) => {
+              {roomData?.teams?.map((team) => {
                 const status = getTeamStatus(team);
                 const isSelected = selectedTeam === team.teamName;
                 const isUserInThisTeam = userInfo?.teamName === team.teamName;
@@ -456,11 +456,11 @@ const TeamSelectionPage = () => {
               </div>
               <div>
                 <p className="text-gray-400">Total Teams</p>
-                <p className="text-white font-semibold">{roomData?.teams.length}</p>
+                <p className="text-white font-semibold"> {roomData?.teams?.length ?? 0}</p>
               </div>
               <div>
                 <p className="text-gray-400">Total Players</p>
-                <p className="text-white font-semibold">{roomData?.users.length}</p>
+                <p className="text-white font-semibold"> {roomData?.teams?.length ?? 0}</p>
               </div>
             </div>
           </div>

@@ -1,81 +1,56 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, DollarSign, Users, Trophy, RefreshCw, ArrowLeft, Check, X, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Clock, DollarSign, Trophy, ArrowLeft, Check, AlertTriangle } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 
-// Type definitions
+// --- API Configuration ---
+const API_BASE_URL = 'http://localhost:5000';
+
+// --- Type definitions ---
+type PlayerType = 'BAT' | 'BOWL' | 'AR' | 'WK';
+type AuctionPhase = 'blind' | 'main' | 'completed';
+type BidStatus = 'active' | 'closed' | 'sold' | 'awarded';
+
 interface AuctionPlayer {
   name: string;
   team: string;
-  type: 'BAT' | 'BOWL' | 'AR' | 'WK';
+  type: PlayerType;
   basePrice?: number;
 }
 
 interface BlindBidPlayer {
   name: string;
   team: string;
-  type: 'BAT' | 'BOWL' | 'AR' | 'WK';
+  type: PlayerType;
 }
 
 interface Bid {
   bidderTeam: string;
   amount: number;
   timestamp: string;
+  bidId?: string;
 }
 
 interface PlayerBid {
   playerName: string;
-  playerType: string;
+  playerType: PlayerType;
   basePrice?: number;
   highestBid?: Bid;
   totalBids: number;
   biddingStartTime: string;
   timeRemaining: number;
-  status: 'active' | 'closed' | 'awarded';
+  status: BidStatus;
   allBids?: Bid[];
 }
 
-interface BlindBid {
-  playerName: string;
-  playerType: string;
-  totalBids: number;
-  biddingStartTime: string;
-  timeRemaining: number;
-  status: 'active' | 'closed' | 'awarded';
-  bids?: Bid[];
+interface ApiResponse {
+  success: boolean;
+  message?: string;
+  players?: AuctionPlayer[] | BlindBidPlayer[];
+  data?: any;
 }
 
-type AuctionPhase = 'blind' | 'main' | 'completed';
-
-// Mock WebSocket for demo
-class MockSocket {
-  private listeners: { [key: string]: Function[] } = {};
-  
-  on(event: string, callback: Function) {
-    if (!this.listeners[event]) {
-      this.listeners[event] = [];
-    }
-    this.listeners[event].push(callback);
-  }
-  
-  emit(event: string, data?: any) {
-    console.log(`Socket emit: ${event}`, data);
-    // Simulate connection success
-    if (event === 'join-room') {
-      setTimeout(() => this.trigger('connect'), 100);
-    }
-  }
-  
-  trigger(event: string, data?: any) {
-    if (this.listeners[event]) {
-      this.listeners[event].forEach(callback => callback(data));
-    }
-  }
-  
-  disconnect() {
-    console.log('Socket disconnected');
-  }
-}
-
-// Error Boundary Component
+// --- Error Boundary Component ---
 const AuctionErrorBoundary: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [hasError, setHasError] = useState(false);
 
@@ -111,35 +86,59 @@ const AuctionErrorBoundary: React.FC<{ children: React.ReactNode }> = ({ childre
   return <>{children}</>;
 };
 
-// Blind Player Bidding Component
+// --- Blind Player Bidding Component ---
 const BlindPlayerBidding: React.FC<{
   roomID: string;
   teamName: string;
   onBidsSubmitted: () => void;
-}> = ({ roomID, teamName, onBidsSubmitted }) => {
+  setError: (error: string | null) => void;
+}> = ({ roomID, teamName, onBidsSubmitted, setError }) => {
+  const [availablePlayers, setAvailablePlayers] = useState<BlindBidPlayer[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
-  const [bidAmounts, setBidAmounts] = useState<{ [key: string]: number }>({});
+  const [bidAmounts, setBidAmounts] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
-  
-  // Mock players for demo
-  const availablePlayers: BlindBidPlayer[] = [
-    { name: "Virat Kohli", team: "RCB", type: "BAT" },
-    { name: "MS Dhoni", team: "CSK", type: "WK" },
-    { name: "Jasprit Bumrah", team: "MI", type: "BOWL" },
-    { name: "Hardik Pandya", team: "MI", type: "AR" },
-    { name: "KL Rahul", team: "PBKS", type: "BAT" }
-  ];
+
+  useEffect(() => {
+    const fetchPlayers = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_BASE_URL}/blind-bid-players`);
+        if (!response.ok) throw new Error('Failed to fetch players for blind bidding.');
+        
+        const data: ApiResponse = await response.json();
+        
+        if (data.success && data.players) {
+          setAvailablePlayers(data.players as BlindBidPlayer[]);
+        } else {
+          throw new Error(data.message || 'Could not parse player data.');
+        }
+        setError(null);
+      } catch (error: any) {
+        console.error('Failed to fetch blind bid players:', error);
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPlayers();
+  }, [setError]);
 
   const handlePlayerSelect = (playerName: string) => {
-    if (selectedPlayers.includes(playerName)) {
-      setSelectedPlayers(prev => prev.filter(p => p !== playerName));
+    setSelectedPlayers(prev => 
+      prev.includes(playerName) 
+        ? prev.filter(p => p !== playerName) 
+        : prev.length < 5 ? [...prev, playerName] : prev
+    );
+    
+    if (!selectedPlayers.includes(playerName)) {
+      setBidAmounts(prev => ({ ...prev, [playerName]: 1000000 }));
+    } else {
       setBidAmounts(prev => {
         const newAmounts = { ...prev };
         delete newAmounts[playerName];
         return newAmounts;
       });
-    } else if (selectedPlayers.length < 5) {
-      setSelectedPlayers(prev => [...prev, playerName]);
     }
   };
 
@@ -149,18 +148,53 @@ const BlindPlayerBidding: React.FC<{
 
   const submitBlindBids = async () => {
     setSubmitting(true);
+    setError(null);
     
     try {
-      // Mock API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      console.log('Blind bids submitted:', { selectedPlayers, bidAmounts });
+      const bidsToSubmit = selectedPlayers.map(playerName => ({
+        playerName,
+        bidAmount: bidAmounts[playerName] || 1000000,
+      }));
+
+      const responses = await Promise.all(
+        bidsToSubmit.map(bid => 
+          fetch(`${API_BASE_URL}/place-blind-bid`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId: roomID,
+              playerName: bid.playerName,
+              bidAmount: bid.bidAmount,
+              bidderTeam: teamName,
+            }),
+          })
+        )
+      );
+
+      const results = await Promise.all(responses.map(res => res.json()));
+      const failed = results.filter(result => !result.success);
+
+      if (failed.length > 0) {
+        throw new Error(`${failed.length} bids failed to submit`);
+      }
+      
       onBidsSubmitted();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to submit blind bids:', error);
+      setError(error.message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="text-center p-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
+        <p className="text-white">Loading Players...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -175,6 +209,12 @@ const BlindPlayerBidding: React.FC<{
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {availablePlayers.map((player) => {
             const isSelected = selectedPlayers.includes(player.name);
+            const typeColors = {
+              BAT: 'bg-blue-500/20 text-blue-300',
+              BOWL: 'bg-green-500/20 text-green-300',
+              AR: 'bg-purple-500/20 text-purple-300',
+              WK: 'bg-yellow-500/20 text-yellow-300',
+            };
             
             return (
               <div
@@ -191,33 +231,23 @@ const BlindPlayerBidding: React.FC<{
                     <h4 className="text-white font-bold">{player.name}</h4>
                     <p className="text-gray-300 text-sm">{player.team}</p>
                   </div>
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                    player.type === 'BAT' ? 'bg-blue-500/20 text-blue-300' :
-                    player.type === 'BOWL' ? 'bg-green-500/20 text-green-300' :
-                    player.type === 'AR' ? 'bg-purple-500/20 text-purple-300' :
-                    'bg-yellow-500/20 text-yellow-300'
-                  }`}>
+                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${typeColors[player.type]}`}>
                     {player.type}
                   </span>
                 </div>
                 
                 {isSelected && (
-                  <input
-                    type="number"
-                    min="100000"
-                    step="100000"
-                    placeholder="Enter max bid"
-                    value={bidAmounts[player.name] || ''}
-                    onChange={(e) => handleBidAmountChange(player.name, Number(e.target.value))}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
-                )}
-                
-                {isSelected && (
-                  <div className="mt-2 flex items-center text-green-300 text-sm">
-                    <Check className="w-4 h-4 mr-1" />
-                    Selected
+                  <div className="mt-3">
+                    <label className="block text-gray-300 text-sm mb-1">Bid Amount (₹)</label>
+                    <input
+                      type="number"
+                      min="100000"
+                      step="100000"
+                      value={bidAmounts[player.name] || ''}
+                      onChange={(e) => handleBidAmountChange(player.name, Number(e.target.value))}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
                   </div>
                 )}
               </div>
@@ -227,32 +257,9 @@ const BlindPlayerBidding: React.FC<{
         
         {selectedPlayers.length > 0 && (
           <div className="mt-6 pt-6 border-t border-white/20">
-            <div className="flex justify-between items-center mb-4">
-              <h4 className="text-lg font-bold text-white">Selected Players Summary</h4>
-              <div className="text-white">
-                Total Budget: ₹{Object.values(bidAmounts).reduce((sum, amount) => sum + (amount || 0), 0).toLocaleString()}
-              </div>
-            </div>
-            
-            <div className="space-y-2 mb-6">
-              {selectedPlayers.map(playerName => (
-                <div key={playerName} className="flex justify-between items-center bg-white/10 rounded-lg p-3">
-                  <span className="text-white">{playerName}</span>
-                  <span className="text-green-300 font-medium">
-                    ₹{(bidAmounts[playerName] || 0).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-            
             <button
               onClick={submitBlindBids}
-              disabled={
-                submitting ||
-                selectedPlayers.length === 0 ||
-                selectedPlayers.some(name => !bidAmounts[name] || bidAmounts[name] <= 0) ||
-                !teamName
-              }
+              disabled={submitting || !teamName}
               className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-all duration-300 flex items-center justify-center gap-2"
             >
               {submitting ? (
@@ -271,120 +278,168 @@ const BlindPlayerBidding: React.FC<{
   );
 };
 
-// Main Auction System Component
+// --- Main Auction System Component ---
 const MainAuctionSystem: React.FC<{
   roomId: string;
-  teamId: string;
   teamName: string;
-  socket: any;
+  socket: Socket | null;
   onAuctionComplete: () => void;
-}> = ({ roomId, teamId, teamName, socket, onAuctionComplete }) => {
-  const [currentPlayer, setCurrentPlayer] = useState<AuctionPlayer | null>({
-    name: "Virat Kohli",
-    team: "RCB", 
-    type: "BAT",
-    basePrice: 2000000
-  });
-  const [currentBids, setCurrentBids] = useState<PlayerBid | null>({
-    playerName: "Virat Kohli",
-    playerType: "BAT",
-    basePrice: 2000000,
-    totalBids: 3,
-    biddingStartTime: new Date().toISOString(),
-    timeRemaining: 25000,
-    status: 'active',
-    highestBid: {
-      bidderTeam: "Mumbai Indians",
-      amount: 3500000,
-      timestamp: new Date().toISOString()
-    },
-    allBids: [
-      { bidderTeam: "Chennai Super Kings", amount: 2000000, timestamp: new Date(Date.now() - 30000).toISOString() },
-      { bidderTeam: "Royal Challengers Bangalore", amount: 2500000, timestamp: new Date(Date.now() - 20000).toISOString() },
-      { bidderTeam: "Mumbai Indians", amount: 3500000, timestamp: new Date(Date.now() - 10000).toISOString() }
-    ]
-  });
+  setError: (error: string | null) => void;
+}> = ({ roomId, teamName, socket, onAuctionComplete, setError }) => {
+  const [currentPlayer, setCurrentPlayer] = useState<AuctionPlayer | null>(null);
+  const [currentBids, setCurrentBids] = useState<PlayerBid | null>(null);
+  const [playerQueue, setPlayerQueue] = useState<AuctionPlayer[]>([]);
   const [bidAmount, setBidAmount] = useState<number>(0);
-  const [remainingTime, setRemainingTime] = useState<number>(25000);
+  const [remainingTime, setRemainingTime] = useState<number>(0);
+  const [isLoadingNextPlayer, setIsLoadingNextPlayer] = useState(false);
 
-  // Timer effect
-  useEffect(() => {
-    if (!currentBids || currentBids.status !== 'active') return;
-    
-    const timer = setInterval(() => {
-      setRemainingTime(prev => {
-        if (prev <= 0) return 0;
-        return prev - 1000;
+  const fetchNextBatch = useCallback(async () => {
+    try {
+      setIsLoadingNextPlayer(true);
+      const response = await fetch(`${API_BASE_URL}/next-batch/${roomId}`);
+      if (!response.ok) throw new Error('Failed to fetch the next batch of players.');
+      
+      const data: ApiResponse = await response.json();
+      if (data.success && data.players && data.players.length > 0) {
+        setPlayerQueue(data.players as AuctionPlayer[]);
+        return data.players as AuctionPlayer[];
+      } else {
+        onAuctionComplete();
+        return [];
+      }
+    } catch (err: any) {
+      setError(err.message);
+      return [];
+    } finally {
+      setIsLoadingNextPlayer(false);
+    }
+  }, [roomId, setError, onAuctionComplete]);
+
+  const startBiddingForPlayer = useCallback(async (player: AuctionPlayer) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/start-bidding`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, playerName: player.name }),
       });
-    }, 1000);
-    
-    return () => clearInterval(timer);
-  }, [currentBids]);
+      
+      if (!response.ok) throw new Error(`Could not start bidding for ${player.name}.`);
+      
+      const bidData = await response.json();
+      if (!bidData.success) throw new Error(bidData.message);
+      
+      setCurrentPlayer(player);
+      setCurrentBids({
+        playerName: player.name,
+        playerType: player.type,
+        basePrice: player.basePrice,
+        highestBid: bidData.highestBid,
+        totalBids: bidData.totalBids || 0,
+        biddingStartTime: bidData.biddingStartTime,
+        timeRemaining: bidData.timeRemaining || 60000,
+        status: 'active',
+        allBids: bidData.allBids || []
+      });
+      setRemainingTime(bidData.timeRemaining || 60000);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }, [roomId, setError]);
 
-  // Format time remaining
+  const getNextPlayer = useCallback(async () => {
+    if (playerQueue.length > 0) {
+      const next = playerQueue[0];
+      setPlayerQueue(prev => prev.slice(1));
+      await startBiddingForPlayer(next);
+    } else {
+      const newBatch = await fetchNextBatch();
+      if (newBatch && newBatch.length > 0) {
+        const next = newBatch[0];
+        setPlayerQueue(newBatch.slice(1));
+        await startBiddingForPlayer(next);
+      }
+    }
+  }, [playerQueue, fetchNextBatch, startBiddingForPlayer]);
+
+  useEffect(() => {
+    const fetchInitialState = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/room-bids/${roomId}`);
+        const data: ApiResponse = await response.json();
+        
+        if (data.success && data.data?.regularBids?.length > 0) {
+          const activeBid = data.data.regularBids[0];
+          setCurrentBids(activeBid);
+          setCurrentPlayer({
+            name: activeBid.playerName,
+            type: activeBid.playerType,
+            basePrice: activeBid.basePrice,
+            team: ''
+          });
+          setRemainingTime(activeBid.timeRemaining);
+        } else {
+          await getNextPlayer();
+        }
+      } catch (err: any) {
+        setError("Could not load current auction data.");
+      }
+    };
+    
+    fetchInitialState();
+
+    if (!socket) return;
+    
+    const handleNewBid = (bidData: PlayerBid) => {
+      setCurrentBids(bidData);
+      setRemainingTime(bidData.timeRemaining);
+    };
+    
+    const handlePlayerSold = (soldData: { playerName: string, winningBid: Bid }) => {
+      setCurrentBids(prev => prev ? { 
+        ...prev, 
+        status: 'sold', 
+        highestBid: soldData.winningBid 
+      } : null);
+      setTimeout(() => getNextPlayer(), 5000);
+    };
+    
+    socket.on('new-bid', handleNewBid);
+    socket.on('player-sold', handlePlayerSold);
+    socket.on('phase-change', (newPhase: AuctionPhase) => {
+      if (newPhase === 'completed') {
+        onAuctionComplete();
+      }
+    });
+
+    return () => {
+      socket.off('new-bid', handleNewBid);
+      socket.off('player-sold', handlePlayerSold);
+      socket.off('phase-change');
+    };
+  }, [socket, roomId, setError, getNextPlayer, onAuctionComplete]);
+
+  const placeBid = async () => {
+    if (!currentPlayer || !teamName || bidAmount <= 0 || !socket) return;
+    
+    try {
+      socket.emit('place-bid', {
+        roomId,
+        playerName: currentPlayer.name,
+        bidAmount,
+        bidderTeam: teamName,
+      });
+      
+      setBidAmount(0);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+  
   const formatTimeRemaining = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.floor((ms % 60000) / 1000);
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-  };
-
-  // Place a bid
-  const placeBid = async () => {
-    if (!currentPlayer || !teamName || bidAmount <= 0) return;
-    
-    try {
-      console.log('Placing bid:', {
-        roomId,
-        playerName: currentPlayer.name,
-        bidAmount,
-        bidderTeam: teamName
-      });
-      
-      // Mock successful bid
-      setBidAmount(0);
-      
-      // Update current bids with new bid
-      const newBid: Bid = {
-        bidderTeam: teamName,
-        amount: bidAmount,
-        timestamp: new Date().toISOString()
-      };
-      
-      setCurrentBids(prev => prev ? {
-        ...prev,
-        highestBid: newBid,
-        totalBids: prev.totalBids + 1,
-        allBids: [...(prev.allBids || []), newBid],
-        timeRemaining: 30000 // Reset timer
-      } : null);
-      
-      setRemainingTime(30000);
-      
-    } catch (err) {
-      console.error('Error placing bid:', err);
-    }
-  };
-
-  const nextPlayer = () => {
-    const players = [
-      { name: "MS Dhoni", team: "CSK", type: "WK" as const, basePrice: 1500000 },
-      { name: "Jasprit Bumrah", team: "MI", type: "BOWL" as const, basePrice: 1200000 },
-      { name: "Hardik Pandya", team: "MI", type: "AR" as const, basePrice: 1800000 }
-    ];
-    
-    const randomPlayer = players[Math.floor(Math.random() * players.length)];
-    setCurrentPlayer(randomPlayer);
-    setCurrentBids({
-      playerName: randomPlayer.name,
-      playerType: randomPlayer.type,
-      basePrice: randomPlayer.basePrice,
-      totalBids: 0,
-      biddingStartTime: new Date().toISOString(),
-      timeRemaining: 30000,
-      status: 'active'
-    });
-    setRemainingTime(30000);
-    setBidAmount(0);
   };
 
   if (!currentPlayer || !currentBids) {
@@ -396,17 +451,19 @@ const MainAuctionSystem: React.FC<{
     );
   }
 
+  const typeColors = {
+    BAT: { bg: 'bg-blue-500/20', text: 'text-blue-300' },
+    BOWL: { bg: 'bg-green-500/20', text: 'text-green-300' },
+    AR: { bg: 'bg-purple-500/20', text: 'text-purple-300' },
+    WK: { bg: 'bg-yellow-500/20', text: 'text-yellow-300' },
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Current Player Card */}
       <div className="lg:col-span-1 bg-white/10 backdrop-blur-md rounded-2xl p-6">
         <div className="mb-4">
           <span className={`inline-block px-3 py-1 rounded-lg text-sm font-medium mb-2 ${
-            currentPlayer.type === 'BAT' ? 'bg-blue-500/20 text-blue-300' :
-            currentPlayer.type === 'BOWL' ? 'bg-green-500/20 text-green-300' :
-            currentPlayer.type === 'AR' ? 'bg-purple-500/20 text-purple-300' :
-            'bg-yellow-500/20 text-yellow-300'
-          }`}>
+            typeColors[currentPlayer.type].bg} ${typeColors[currentPlayer.type].text}`}>
             {currentPlayer.type}
           </span>
           <h2 className="text-2xl font-bold text-white">{currentPlayer.name}</h2>
@@ -417,11 +474,11 @@ const MainAuctionSystem: React.FC<{
           <div className="flex justify-between items-center">
             <span className="text-gray-300">Base Price:</span>
             <span className="text-white font-medium">
-              ₹{currentPlayer.basePrice?.toLocaleString()}
+              ₹{currentPlayer.basePrice?.toLocaleString() || '0'}
             </span>
           </div>
           
-          {currentBids?.highestBid && (
+          {currentBids.highestBid && (
             <>
               <div className="flex justify-between items-center">
                 <span className="text-gray-300">Current Highest Bid:</span>
@@ -442,13 +499,12 @@ const MainAuctionSystem: React.FC<{
           <div className="flex justify-between items-center">
             <span className="text-gray-300">Total Bids:</span>
             <span className="text-white font-medium">
-              {currentBids?.totalBids || 0}
+              {currentBids.totalBids || 0}
             </span>
           </div>
         </div>
       </div>
       
-      {/* Bidding Section */}
       <div className="lg:col-span-2 bg-white/10 backdrop-blur-md rounded-2xl p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Place Your Bid</h2>
@@ -461,40 +517,28 @@ const MainAuctionSystem: React.FC<{
           </div>
         </div>
         
-        {currentBids?.status === 'active' ? (
+        {currentBids.status === 'active' ? (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row gap-4">
               <input
                 type="number"
-                min={currentBids.highestBid ? currentBids.highestBid.amount + 100000 : currentPlayer.basePrice}
+                min={(currentBids.highestBid?.amount || currentPlayer.basePrice || 0) + 100000}
                 step="100000"
                 value={bidAmount || ''}
                 onChange={(e) => setBidAmount(Number(e.target.value))}
-                placeholder={`Minimum bid: ₹${(currentBids.highestBid ? currentBids.highestBid.amount + 100000 : currentPlayer.basePrice)?.toLocaleString()}`}
+                placeholder={`Minimum bid: ₹${(
+                  (currentBids.highestBid?.amount || currentPlayer.basePrice || 0) + 100000
+                ).toLocaleString()}`}
                 className="flex-1 px-4 py-3 bg-white/20 backdrop-blur-sm border border-white/30 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
               />
               
               <button
                 onClick={placeBid}
-                disabled={!teamName || bidAmount <= 0 || (currentBids.highestBid && bidAmount <= currentBids.highestBid.amount)}
+                disabled={!teamName || bidAmount <= 0 || 
+                  (currentBids.highestBid && bidAmount <= currentBids.highestBid.amount)}
                 className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-all duration-300"
               >
                 Place Bid
-              </button>
-            </div>
-            
-            <p className="text-gray-300 text-sm">
-              Your bid must be at least ₹100,000 higher than the current highest bid.
-            </p>
-            
-            {/* Demo Controls */}
-            <div className="mt-6 pt-6 border-t border-white/20">
-              <h3 className="text-lg font-medium text-white mb-3">Demo Controls</h3>
-              <button
-                onClick={nextPlayer}
-                className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-xl transition-all duration-300"
-              >
-                Next Player (Demo)
               </button>
             </div>
           </div>
@@ -513,8 +557,7 @@ const MainAuctionSystem: React.FC<{
           </div>
         )}
         
-        {/* Bid History */}
-        {currentBids?.allBids && currentBids.allBids.length > 0 && (
+        {currentBids.allBids && currentBids.allBids.length > 0 && (
           <div className="mt-8">
             <h3 className="text-lg font-medium text-white mb-3">Bid History</h3>
             <div className="bg-black/30 rounded-xl overflow-hidden">
@@ -527,7 +570,7 @@ const MainAuctionSystem: React.FC<{
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  {currentBids.allBids.slice().reverse().map((bid, index) => (
+                  {[...currentBids.allBids].reverse().map((bid, index) => (
                     <tr key={index} className="text-white">
                       <td className="px-4 py-3">{bid.bidderTeam}</td>
                       <td className="px-4 py-3 font-medium">₹{bid.amount.toLocaleString()}</td>
@@ -546,43 +589,117 @@ const MainAuctionSystem: React.FC<{
   );
 };
 
-// Main Auction Page Component
+// --- Main Auction Page Component ---
 const AuctionPage: React.FC = () => {
   const [auctionPhase, setAuctionPhase] = useState<AuctionPhase>('blind');
   const [teamName, setTeamName] = useState<string>('');
   const [teamId, setTeamId] = useState<string>('');
   const [connected, setConnected] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Mock room ID and socket
-  const roomId = 'demo-room-123';
-  const [socket] = useState(() => new MockSocket());
+  const [bidsSubmitted, setBidsSubmitted] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
+
+  const router = useRouter();
+  const params = useParams();
+  const roomId = params.roomId as string;
   
   useEffect(() => {
-    // Mock socket connection
-    socket.emit('join-room', roomId);
-    socket.on('connect', () => setConnected(true));
-    socket.on('disconnect', () => setConnected(false));
+    const storedUserInfo = localStorage.getItem('userInfo');
+    if (storedUserInfo) {
+      try {
+        const userInfo = JSON.parse(storedUserInfo);
+        if (userInfo.teamName) {
+          setTeamName(userInfo.teamName);
+          setTeamId(userInfo.teamName.toLowerCase().replace(/\s+/g, '-'));
+        }
+      } catch (err) {
+        console.error('Failed to parse user info', err);
+      }
+    }
     
-    return () => socket.disconnect();
-  }, []);
-  
+    const fetchRoomState = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/room-state/${roomId}`);
+        if (!response.ok) throw new Error('Could not connect to the auction room.');
+        
+        const data: ApiResponse = await response.json();
+        if (data.success && data.data?.auctionPhase) {
+          setAuctionPhase(data.data.auctionPhase as AuctionPhase);
+        } else {
+          throw new Error(data.message || 'Invalid room state');
+        }
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchRoomState();
+
+    // Initialize socket connection
+    socketRef.current = io(API_BASE_URL, {
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
+
+    const socket = socketRef.current;
+
+    const handleConnect = () => {
+      setConnected(true);
+      socket.emit('join-room', roomId);
+    };
+
+    const handleDisconnect = () => {
+      setConnected(false);
+    };
+
+    const handlePhaseChange = (newPhase: AuctionPhase) => {
+      setAuctionPhase(newPhase);
+    };
+
+    const handleConnectError = (error: Error) => {
+      console.error('Socket connection error:', error);
+      setError('Connection error - attempting to reconnect...');
+    };
+
+    // Set up event listeners
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('phase-change', handlePhaseChange);
+    socket.on('connect_error', handleConnectError);
+
+    // Cleanup function
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('phase-change', handlePhaseChange);
+      socket.off('connect_error', handleConnectError);
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [roomId]);
+
+  const handleTeamNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newName = e.target.value;
+    setTeamName(newName);
+    setTeamId(newName.toLowerCase().replace(/\s+/g, '-'));
+    localStorage.setItem('userInfo', JSON.stringify({ teamName: newName }));
+  };
+
   const handleBlindBidsSubmitted = () => {
-    console.log('Blind bids submitted successfully');
-    // Transition to main auction after a delay
-    setTimeout(() => {
-      setAuctionPhase('main');
-    }, 2000);
+    setBidsSubmitted(true);
   };
   
   const handleAuctionComplete = () => {
-    console.log('Main auction completed!');
     setAuctionPhase('completed');
   };
   
   const goBack = () => {
-    console.log('Going back to room page');
+    router.back();
   };
   
   if (loading) {
@@ -590,7 +707,7 @@ const AuctionPage: React.FC = () => {
       <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white text-xl">Loading auction data...</p>
+          <p className="text-white text-xl">Connecting to auction...</p>
         </div>
       </div>
     );
@@ -602,28 +719,19 @@ const AuctionPage: React.FC = () => {
         <div className="bg-red-500/20 backdrop-blur-lg rounded-2xl p-8 border border-red-400/30 text-center">
           <h2 className="text-2xl font-bold text-white mb-4">Error</h2>
           <p className="text-red-200 mb-6">{error}</p>
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-white/20 hover:bg-white/30 text-white font-semibold py-2 px-6 rounded-xl transition-all duration-300"
-            >
-              Try Again
-            </button>
-            <button
-              onClick={goBack}
-              className="bg-gray-500/20 hover:bg-gray-500/30 text-white font-semibold py-2 px-6 rounded-xl transition-all duration-300"
-            >
-              Go Back
-            </button>
-          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-white/20 hover:bg-white/30 text-white font-semibold py-2 px-6 rounded-xl transition-all duration-300"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
   }
-  
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 p-4 md:p-8">
-      {/* Header */}
       <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 mb-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <button
@@ -643,133 +751,60 @@ const AuctionPage: React.FC = () => {
           </div>
           
           <div className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-sm font-medium">
-            Phase: {auctionPhase === 'blind' ? 'Blind Auction' : auctionPhase === 'main' ? 'Main Auction' : 'Completed'}
+            Phase: {auctionPhase.charAt(0).toUpperCase() + auctionPhase.slice(1)}
           </div>
         </div>
       </div>
       
-      {/* Team Name Input */}
       <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 mb-6">
         <div className="flex flex-col md:flex-row gap-4 items-center">
           <label className="text-white font-medium">Your Team Name:</label>
           <input
             type="text"
             value={teamName}
-            onChange={(e) => {
-              setTeamName(e.target.value);
-              setTeamId(e.target.value.toLowerCase().replace(/\s+/g, '-'));
-            }}
-            placeholder="Enter your team name"
-            className="flex-1 px-4 py-2 bg-white/20 backdrop-blur-sm border border-white/30 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+            onChange={handleTeamNameChange}
+            disabled={bidsSubmitted || auctionPhase !== 'blind'}
+            placeholder="Enter your team name to participate"
+            className="flex-1 px-4 py-2 bg-white/20 backdrop-blur-sm border border-white/30 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:bg-gray-700/50 disabled:cursor-not-allowed"
           />
         </div>
       </div>
       
-      {/* Phase Controls (Demo) */}
-      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 mb-6 flex gap-4">
-        <button
-          onClick={() => setAuctionPhase('blind')}
-          className={`px-4 py-2 rounded-xl font-medium transition-all ${
-            auctionPhase === 'blind' 
-              ? 'bg-blue-600 text-white' 
-              : 'bg-white/20 text-gray-300 hover:bg-white/30'
-          }`}
-        >
-          Blind Phase
-        </button>
-        <button
-          onClick={() => setAuctionPhase('main')}
-          className={`px-4 py-2 rounded-xl font-medium transition-all ${
-            auctionPhase === 'main' 
-              ? 'bg-blue-600 text-white' 
-              : 'bg-white/20 text-gray-300 hover:bg-white/30'
-          }`}
-        >
-          Main Auction
-        </button>
-        <button
-          onClick={() => setAuctionPhase('completed')}
-          className={`px-4 py-2 rounded-xl font-medium transition-all ${
-            auctionPhase === 'completed' 
-              ? 'bg-blue-600 text-white' 
-              : 'bg-white/20 text-gray-300 hover:bg-white/30'
-          }`}
-        >
-          Completed
-        </button>
-      </div>
-      
-      {/* Blind Auction Phase */}
-      {auctionPhase === 'blind' && (
-        <div className="space-y-6">
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold text-white">Blind Auction Phase</h2>
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-yellow-300" />
-                <span className="text-yellow-300 font-medium">
-                  Phase: Blind Bidding Active
-                </span>
-              </div>
-            </div>
-            <p className="text-gray-300">
-              Select up to 5 players you want to bid on. Your selections will be kept secret 
-              until the blind auction phase ends.
-            </p>
-          </div>
-
+      <AuctionErrorBoundary>
+        {auctionPhase === 'blind' ? (
           <BlindPlayerBidding
             roomID={roomId}
             teamName={teamName}
             onBidsSubmitted={handleBlindBidsSubmitted}
+            setError={setError}
           />
-        </div>
-      )}
-      
-      {/* Main Auction Phase */}
-      {auctionPhase === 'main' && (
-        <AuctionErrorBoundary>
-          <div className="space-y-6">
-            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 mb-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-white">Main Auction Phase</h2>
-                <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  connected ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
-                }`}>
-                  {connected ? 'Connected' : 'Disconnected'}
-                </div>
-              </div>
-            </div>
-            
-            <MainAuctionSystem
-              roomId={roomId}
-              teamId={teamId}
-              teamName={teamName}
-              socket={socket}
-              onAuctionComplete={handleAuctionComplete}
-            />
+        ) : auctionPhase === 'main' ? (
+          <MainAuctionSystem
+            roomId={roomId}
+            teamName={teamName}
+            socket={socketRef.current}
+            onAuctionComplete={handleAuctionComplete}
+            setError={setError}
+          />
+        ) : (
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 text-center">
+            <Trophy className="w-16 h-16 text-yellow-300 mx-auto mb-4" />
+            <h2 className="text-3xl font-bold text-white mb-3">Auction Completed!</h2>
+            <p className="text-gray-300 mb-6">
+              All players have been auctioned. Check the room page to see the final results.
+            </p>
+            <button
+              onClick={goBack}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all duration-300"
+            >
+              View Results
+            </button>
           </div>
-        </AuctionErrorBoundary>
-      )}
-      
-      {/* Auction Completed */}
-      {auctionPhase === 'completed' && (
-        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 text-center">
-          <Trophy className="w-16 h-16 text-yellow-300 mx-auto mb-4" />
-          <h2 className="text-3xl font-bold text-white mb-3">Auction Completed!</h2>
-          <p className="text-gray-300 mb-6">
-            All players have been auctioned. Check the room page to see the final results.
-          </p>
-          <button
-            onClick={goBack}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all duration-300"
-          >
-            View Results
-          </button>
-        </div>
-      )}
+        )}
+      </AuctionErrorBoundary>
     </div>
   );
 };
 
-export default AuctionPage
+export default AuctionPage;
+export { AuctionErrorBoundary, BlindPlayerBidding, MainAuctionSystem };
